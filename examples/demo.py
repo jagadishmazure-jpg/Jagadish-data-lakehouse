@@ -3,6 +3,7 @@ evolution, time travel, optimize and vacuum on a throwaway table."""
 import tempfile
 
 from lakehouse.checks import CheckViolation, expect_no_nulls, expect_unique
+from lakehouse.decontaminate import decontaminate
 from lakehouse.maintenance import optimize, vacuum
 from lakehouse.schema import Schema, SchemaViolation
 from lakehouse.table import DeltaTable, VersionNotAvailable
@@ -48,3 +49,15 @@ with tempfile.TemporaryDirectory() as tmp:
         as_of(evolved, 0)
     except VersionNotAvailable as e:
         print("time travel past retention:", e)
+
+# Eval-set decontamination: strip train rows that copy or paraphrase eval rows before training.
+eval_rows = [{"id": "e1", "text": "Which warehouse had the most late shipments in the second quarter of last year?"},
+             {"id": "e2", "text": "List every supplier whose on-time rate fell below ninety percent this month."}]
+train_rows = [
+    {"id": "t1", "text": "which warehouse had the most late shipments in the second quarter of last year?"},
+    {"id": "t2", "text": "Which warehouse had the most late shipments in the second quarter of last year overall?"},
+    {"id": "t3", "text": "How many pallets were received at the north depot on Monday morning?"},
+]
+clean, report = decontaminate(train_rows, eval_rows, threshold=0.7)
+print(f"Decontamination: kept {report.kept}/{report.train_total} train rows; removed "
+      + ", ".join(f"{r.train_id} ({r.kind}, Jaccard {r.score:.2f} vs {r.eval_id})" for r in report.removed))

@@ -195,3 +195,20 @@ def test_removal_dataclass_fields():
 def test_report_defaults():
     rep = DecontaminationReport()
     assert rep.removed == [] and rep.kept == 0
+
+
+def test_full_shingle_overlap_without_equal_text_is_near_not_exact():
+    # Cycled text shares every 5-shingle (Jaccard 1.0) but is not the same row.
+    base = "alpha beta gamma delta epsilon"
+    train = [{"id": "t1", "text": " ".join([base] * 3)}]
+    evals = [{"id": "e1", "text": " ".join([base] * 2)}]
+    _, report = decontaminate(train, evals)
+    assert report.removed[0].score == 1.0
+    assert report.removed[0].kind == "near"
+
+
+def test_exact_kind_ignores_case_and_whitespace():
+    train = [{"id": "t1", "text": "  The Quick  brown fox "}]
+    evals = [{"id": "e1", "text": "the quick brown fox"}]
+    _, report = decontaminate(train, evals)
+    assert (report.removed[0].kind, report.removed[0].eval_id) == ("exact", "e1")

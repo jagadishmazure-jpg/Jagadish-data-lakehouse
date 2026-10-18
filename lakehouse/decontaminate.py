@@ -142,7 +142,7 @@ class Removal:
     train_id: Any
     eval_id: Any
     score: float  # exact Jaccard similarity of the shingle sets
-    kind: str  # "exact" (score == 1.0) or "near"
+    kind: str  # "exact" (same normalized text) or "near" (shingle Jaccard >= threshold)
 
 
 @dataclass
@@ -169,30 +169,34 @@ def decontaminate(
 ) -> Tuple[List[Dict[str, Any]], DecontaminationReport]:
     """Strip train rows matching eval rows (exact or near-duplicate).
 
-    Returns (kept_rows, report). Each train row is checked against every
-    eval row; on multiple matches the highest-scoring eval row is cited.
+    Returns (kept_rows, report). A train row whose normalized text equals an
+    eval row is an "exact" removal. Otherwise it is checked against every eval
+    row (no LSH banding, so the cost is O(train x eval) signature compares) and
+    the highest-scoring match is cited as "near".
     Rows are never mutated — kept rows are the original dicts.
     """
     index = NearDuplicateIndex(k=k, threshold=threshold, seed=seed)
+    exact: Dict[str, Any] = {}
     for row in eval_rows:
         index.add(row[id_key], str(row[text_key]))
+        exact.setdefault(normalize_text(str(row[text_key])), row[id_key])
 
     kept: List[Dict[str, Any]] = []
     report = DecontaminationReport(
         train_total=len(train_rows), eval_total=len(eval_rows)
     )
     for row in train_rows:
-        hits = index.query(str(row[text_key]))
+        text = str(row[text_key])
+        norm = normalize_text(text)
+        if norm in exact:
+            # Same text after normalization. A shingle Jaccard of 1.0 alone
+            # is not enough: repeated or cycled text can share every shingle.
+            report.removed.append(Removal(row[id_key], exact[norm], 1.0, "exact"))
+            continue
+        hits = index.query(text)
         if not hits:
             kept.append(row)
             continue
         eval_id, score = hits[0]
-        report.removed.append(
-            Removal(
-                train_id=row[id_key],
-                eval_id=eval_id,
-                score=score,
-                kind="exact" if score == 1.0 else "near",
-            )
-        )
+        report.removed.append(Removal(row[id_key], eval_id, score, "near"))
     return kept, report

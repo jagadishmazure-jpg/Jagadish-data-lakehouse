@@ -62,6 +62,12 @@ transaction started from (optimistic concurrency).
 versions, `optimize`, `vacuum` with a retention count, and a z-order hint.
 Concepts: [docs/delta-concepts.md](docs/delta-concepts.md).
 
+**Decontamination** (`lakehouse/decontaminate.py`): before a training table is
+used, train rows that copy an eval row are removed. A row is "exact" if its
+normalised text equals the eval row, and "near" if its word 5-shingle Jaccard
+clears the threshold after a MinHash prefilter. Every removal is reported with
+its score and the eval row it matched.
+
 ## Real code and output
 
 ```python
@@ -70,6 +76,7 @@ evolution, time travel, optimize and vacuum on a throwaway table."""
 import tempfile
 
 from lakehouse.checks import CheckViolation, expect_no_nulls, expect_unique
+from lakehouse.decontaminate import decontaminate
 from lakehouse.maintenance import optimize, vacuum
 from lakehouse.schema import Schema, SchemaViolation
 from lakehouse.table import DeltaTable, VersionNotAvailable
@@ -115,6 +122,18 @@ with tempfile.TemporaryDirectory() as tmp:
         as_of(evolved, 0)
     except VersionNotAvailable as e:
         print("time travel past retention:", e)
+
+# Eval-set decontamination: strip train rows that copy or paraphrase eval rows before training.
+eval_rows = [{"id": "e1", "text": "Which warehouse had the most late shipments in the second quarter of last year?"},
+             {"id": "e2", "text": "List every supplier whose on-time rate fell below ninety percent this month."}]
+train_rows = [
+    {"id": "t1", "text": "which warehouse had the most late shipments in the second quarter of last year?"},
+    {"id": "t2", "text": "Which warehouse had the most late shipments in the second quarter of last year overall?"},
+    {"id": "t3", "text": "How many pallets were received at the north depot on Monday morning?"},
+]
+clean, report = decontaminate(train_rows, eval_rows, threshold=0.7)
+print(f"Decontamination: kept {report.kept}/{report.train_total} train rows; removed "
+      + ", ".join(f"{r.train_id} ({r.kind}, Jaccard {r.score:.2f} vs {r.eval_id})" for r in report.removed))
 ```
 
 Output of `python examples/demo.py` (real run, re-checked in CI):
@@ -132,6 +151,7 @@ history: [(0, 'WRITE'), (1, 'WRITE'), (2, 'TRANSACTION'), (3, 'WRITE'), (4, 'WRI
 optimize: {'operation': 'OPTIMIZE', 'files_before': 5, 'files_after': 5}
 vacuum (keep 2 versions): {'operation': 'VACUUM', 'removed_versions': [0, 1, 2]}
 time travel past retention: version 0 is not available: it was never written or was removed by VACUUM (current version 4)
+Decontamination: kept 1/3 train rows; removed t1 (exact, Jaccard 1.00 vs e1), t2 (near, Jaccard 0.75 vs e1)
 ```
 <!-- /run -->
 
@@ -150,7 +170,7 @@ Test suite size (real collection, re-checked in CI):
 
 <!-- run: python scripts/count_tests.py -->
 ```text
-38 tests collected
+64 tests collected
 ```
 <!-- /run -->
 
@@ -167,6 +187,8 @@ Test suite size (real collection, re-checked in CI):
 - Commit atomicity relies on a single local filesystem; there is no object-store put-if-absent.
 - Z-ordering is a recorded hint only; no data is reordered.
 - JSON files, not Parquet; no partitioning, statistics or data skipping.
+- Decontamination compares every train row with every eval row (no LSH banding), so it suits thousands of rows, not millions.
+- Punctuation stays attached to words, so 'year?' and 'year' differ; the demo's paraphrase scores 0.75 and needs a 0.7 threshold.
 
 ## Built vs planned
 
@@ -177,6 +199,7 @@ Test suite size (real collection, re-checked in CI):
 | Quality checks on write | Built | `lakehouse/checks.py` |
 | Transactions with optimistic concurrency | Built | `lakehouse/transactions.py` |
 | Time travel, diff, optimize, vacuum | Built | `lakehouse/time_travel.py`, `lakehouse/maintenance.py` |
+| Eval-set decontamination (exact + MinHash near-duplicate) | Built | `lakehouse/decontaminate.py` |
 | Change-only files, Parquet, partitioning | Planned | not started |
 | Object-store commit protocol | Planned | docs/implementation-guide.md |
 
@@ -229,6 +252,7 @@ lakehouse/
   transactions.py  staged writes, optimistic concurrency
   time_travel.py   as_of, as_of_timestamp, diff
   maintenance.py   optimize, vacuum, z-order hint
+  decontaminate.py exact + near-duplicate eval leakage removal
 examples/demo.py   the run shown above
 tests/             offline pytest suite
 ```
