@@ -51,7 +51,7 @@ class Transaction:
             return False
         # Validate everything before committing anything.
         if table.schema is not None:
-            for rows, mode, _op in self._staged:
+            for rows, _mode, _op in self._staged:
                 table.schema.validate_rows(rows)
         base_rows = table.read() if self._start_version >= 0 else []
         merged: list = list(base_rows)

@@ -267,7 +267,8 @@ def test_vacuum_deletes_old_versions(tmp_path):
     assert t.read() == [{"id": i} for i in range(4)]  # latest intact
     assert t.read(version=3) == [{"id": i} for i in range(4)]
     # Time travel past the horizon fails.
-    with pytest.raises(Exception):
+    from lakehouse.table import VersionNotAvailable
+    with pytest.raises(VersionNotAvailable):
         t.read(version=0)
 
 
@@ -355,3 +356,16 @@ def test_time_travel_after_vacuum_horizon(tmp_path):
     t.write([{"id": 2}])
     vacuum(t, retain_versions=1)
     assert as_of(t, 1) == [{"id": 1}, {"id": 2}]
+
+
+def test_time_travel_past_vacuum_raises_clear_error(tmp_path):
+    """Added after review: used to leak a raw FileNotFoundError with a file path."""
+    from lakehouse.table import VersionNotAvailable
+    t = make_table(tmp_path)
+    for i in range(3):
+        t.write([{"id": i}])
+    vacuum(t, retain_versions=1)
+    with pytest.raises(VersionNotAvailable, match="removed by VACUUM"):
+        as_of(t, 0)
+    with pytest.raises(VersionNotAvailable):
+        as_of(t, 99)

@@ -1,11 +1,38 @@
+# Offline CI: lint, tests, documented-output drift check, secret scan. No cloud access.
 name: ci
-on: [push, pull_request]
+on:
+  push: { branches: [main] }
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: python -m pytest tests/ -q
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with: { python-version: "3.12" }
+      - name: Install
+        run: pip install pytest==9.1.1 ruff==0.17.1 
+      - name: Lint
+        run: ruff check .
+      - name: Tests (offline)
+        run: python -m pytest -q
+      - name: Documented output matches a fresh run
+        run: python scripts/render_docs.py --check
+      - name: No real brand names in code or sample data
+        run: python scripts/check_brands.py
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with: { fetch-depth: 0 }
+      - name: gitleaks (full history)
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

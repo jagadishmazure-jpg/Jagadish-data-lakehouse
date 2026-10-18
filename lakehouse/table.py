@@ -26,6 +26,10 @@ from .schema import Schema
 LOG_DIR = "_delta_log"
 
 
+
+class VersionNotAvailable(LookupError):
+    """Time travel to a version that does not exist or was vacuumed."""
+
 class DeltaTable:
     def __init__(self, path: str, schema: Optional[Schema] = None):
         self.path = path
@@ -60,8 +64,14 @@ class DeltaTable:
             json.dump(entry, f, indent=1)
 
     def _read_log_entry(self, version: int) -> Dict[str, Any]:
-        with open(self._log_path(version)) as f:
-            return json.load(f)
+        try:
+            with open(self._log_path(version)) as f:
+                return json.load(f)
+        except FileNotFoundError:
+            raise VersionNotAvailable(
+                f"version {version} is not available: it was never written or was "
+                f"removed by VACUUM (current version {self.current_version()})"
+            ) from None
 
     def current_version(self) -> int:
         """Highest committed version, or -1 when the table is empty."""
