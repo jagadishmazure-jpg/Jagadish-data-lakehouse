@@ -1,0 +1,17 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lakehouse"
+version = "0.1.0"
+description = "Delta Lake-style lakehouse: ACID transactions, schema enforcement, time travel"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.hatch.build.targets.wheel]
+packages = ["lakehouse"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
